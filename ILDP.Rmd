@@ -1,0 +1,719 @@
+---
+output:  
+  html_document:
+    number_sections: true
+    fig_caption: true
+    toc: true
+    fig_width: 7
+    fig_height: 4.5
+    theme: cosmo
+    highlight: tango
+    code_folding: hide
+---
+
+```{r setup, warning=FALSE, include=FALSE}
+
+library(ggplot2) 
+library(readr) 
+library(dplyr) 
+library(e1071)
+library(DT)
+library(corrplot)
+library(randomForest)
+library(class)
+library(patchwork)
+library(caret)
+library(pROC)
+library(PRROC)
+library(rsample)
+library(tidyr)
+
+```
+
+
+# Project Overview: Liver Disease Diagnosis Analysis and Predictor Development
+
+In this project, I aim to analyze medical data to assist in the early diagnosis of liver diseases. The primary goals of this project are as follows:
+
+1. **Exploratory Data Analysis (EDA) and Machine Learning Modeling**:
+   - **Objective**: Utilize exploratory data analysis to uncover significant insights from a dataset containing various liver function tests and demographic details. The analysis will focus on identifying trends, patterns, and relationships that may be indicative of liver disease.
+   - **Methodology**: Employ statistical methodologies and visualization techniques to conduct a thorough exploration of the data. Following the EDA, I will implement basic machine learning models to predict the likelihood of liver disease based on the features identified in the data.
+
+2. **Development of an R Shiny Application**:
+   - **Objective**: Construct an interactive R Shiny application to dynamically display the results from the EDA and the predictive performance of the machine learning models. This application will allow users to interact with the data analysis, visualize the EDA findings, and understand the model predictions.
+   - **Features**: The Shiny application will include interactive elements such as plots, tables, and model comparison tools, which will enable users to filter the data, adjust parameters, and compare the effectiveness of various predictive models.
+
+# Introduction 
+
+## ILDP Dataset
+
+Age	- Age of the patient. Any patient whose age exceeded 89 is listed as being of age "90"
+
+Gender - Gender of the patient
+
+TB - Total Bilirubin
+
+DB - Direct Bilirubin
+
+Alkphos - Alkaline Phosphotase
+
+Sgpt - Alamine Aminotransferase
+
+Sgot - Aspartate Aminotransferase
+
+TP - Total Proteins
+
+ALB - Albumin
+
+A/G Ratio - Albumin and Globulin Ratio
+
+Selector - Selector field used to split the data into two sets (labeled by the experts)
+
+```{r}
+df <- read.csv("./Data/Indian Liver Patient Dataset (ILPD).csv")
+colnames(df) <- c("age", "gender", "tb", "db", "alkphos" ,"sgpt", "sgot" ,"tp" ,"alb" ,"agratio" ,"selector" )
+datatable(df)
+```
+# Motivation
+My keen interest in medical datasets and prior experience in analyzing health-related information drove me to undertake this project. The Indian Liver Patient Dataset (ILPD) particularly caught my attention due to the scarcity of comprehensive studies available online, presenting a unique opportunity to delve into uncharted waters. This dataset offers a blend of clinical metrics and demographic data, providing a rich basis for applying and enhancing my data analysis skills in a meaningful context.
+
+In this project, I will investigate a dataset comprising various liver function test results to extract critical insights into liver disease diagnosis. By employing exploratory data analysis (EDA) and basic machine learning (ML) modeling techniques, I aim to address several pivotal questions:
+
+1. **Is there a correlation between liver function test results and the presence of liver disease?**
+2. **What demographic factors (age, gender) are associated with an increased likelihood of liver disease?**
+3. **Can we predict liver disease status based on available patient data, and which features are most predictive?**
+
+# Preliminary Exploratory Data Analysis
+
+```{r}
+liver_data = df
+str(liver_data)
+summary(liver_data)
+```
+
+```{r}
+# Visualize the distribution of Age
+ggplot(data = liver_data, aes(x = age)) +
+  geom_histogram(binwidth = 5, fill = "#1999f1", color = "black") +
+  labs(title = "Distribution of Age", x = "Age", y = "Frequency") +
+  theme_minimal()
+```
+
+
+- Age is Normally Distributed.
+
+```{r}
+# Visualize the gender distribution
+ggplot(data = liver_data, aes(x = gender)) +
+  geom_bar(fill = "#1199b1", color = "black") +
+  labs(title = "Gender Distribution", x = "Gender", y = "Count") +
+  theme_minimal()
+
+```
+
+
+- Data Imbalance can be spotted with regards to Gender.
+
+```{r}
+# Visualize Total Bilirubin levels
+ggplot(data = liver_data, aes(x = tb)) +
+  geom_histogram(binwidth = 0.5, fill = "orange", color = "black") +
+  labs(title = "Distribution of Total Bilirubin", x = "Total Bilirubin (mg/dL)", y = "Frequency") +
+  theme_minimal()
+
+```
+
+
+- The distribution of Total Bilirubin is highly skewed to the right, with the majority of observations concentrated at very low values, suggesting that most patients have normal or near-normal bilirubin levels.
+
+```{r}
+# Density plots for numeric variables
+selected_columns <- c("age", "tb", "db", "alkphos", "sgpt", "sgot", "tp", "alb")
+df_selected <- df[selected_columns]
+
+df_long <- pivot_longer(df_selected, 
+                        cols = everything(), 
+                        names_to = "variable", 
+                        values_to = "value")
+
+ggplot(df_long, aes(x = value, fill = variable)) +
+  geom_density(alpha = 0.6) + 
+  scale_fill_viridis_d() +
+  labs(x = "Value", y = "Density", fill = "Variable") +
+  facet_wrap(~variable, scales = "free") +
+  theme_minimal() +  
+  ggtitle("Density Plots for Numeric Variables")
+
+
+```
+
+
+- The density plots for the selected variables show varying distributions: **age**, **alb**, and **tp** exhibit relatively normal distributions, while **db**, **tb**, **alkphos**, **sgpt**, and **sgot** are heavily skewed to the right, indicating a concentration of lower values with fewer high outliers. This suggests potential transformations, such as logarithmic scaling, might be necessary for the skewed variables to improve modeling outcomes.
+
+```{r}
+# Visualize the relationship between Age and Total Bilirubin with the Selector
+ggplot(data = liver_data, aes(x = age, y = tb, color = factor(selector))) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Age vs Total Bilirubin by Disease Presence", x = "Age", y = "Total Bilirubin (mg/dL)", color = "Disease Presence") +
+  theme_minimal()
+
+```
+
+- The scatter plot suggests that higher levels of Total Bilirubin are more frequently observed in patients with liver disease (indicated by Disease Presence "1"), across all age groups, while patients without liver disease (Disease Presence "2") generally exhibit lower Bilirubin levels, irrespective of age. Let us build more upon this in the next section.
+
+```{r warning=FALSE}
+# Boxplot for Albumin and Globulin Ratio by Gender
+ggplot(data = liver_data, aes(x = gender, y = agratio, fill = gender)) +
+  geom_boxplot() +
+  labs(title = "Albumin and Globulin Ratio by Gender", x = "Gender", y = "A/G Ratio") +
+  theme_minimal()
+
+```
+
+- The boxplot shows that the median Albumin and Globulin Ratio (A/G Ratio) is similar between genders, but males display a wider interquartile range and more outliers, suggesting greater variability in their A/G ratios compared to females.
+
+```{r}
+corrplot(cor(df[c("age", "tb", "db", "alkphos", "sgpt", "sgot", "tp", "alb")]), 
+         method="color",col=colorRampPalette(c("#df1911", "#df5d00", "#F5E3B3","#D9fdd9","#C8F3B3" ))(100),type="upper",tl.srt=90,tl.col="black")
+```
+
+- Multicollinearity is a possibile threat to our model here. Might need to examine which variables actually matter.
+
+# Is there a correlation between liver function test results and the presence of liver disease?
+
+```{r warning=FALSE}
+# Total Bilirubin vs. Disease Presence
+plot1 <- ggplot(data = liver_data, aes(x = factor(selector), y = tb, color = factor(selector))) +
+  geom_jitter(alpha = 0.4, width = 0.2) +
+  labs(title = "Total Bilirubin vs. Disease Presence",
+       x = "Disease Presence",
+       y = "Total Bilirubin (mg/dL)") +
+  theme_minimal()
+
+# Alkaline Phosphatase vs. Disease Presence
+plot2 <- ggplot(data = liver_data, aes(x = factor(selector), y = alkphos, color = factor(selector))) +
+  geom_jitter(alpha = 0.4, width = 0.2) +
+  labs(title = "Alkaline Phosphatase vs. Disease Presence",
+       x = "Disease Presence",
+       y = "Alkaline Phosphatase (IU/L)") +
+  theme_minimal()
+
+# Aspartate Aminotransferase vs. Disease Presence
+plot3 <- ggplot(data = liver_data, aes(x = factor(selector), y = sgot, color = factor(selector))) +
+  geom_jitter(alpha = 0.4, width = 0.2) +
+  labs(title = "sgot vs. Disease Presence",
+       x = "Disease Presence",
+       y = "Aspartate Aminotransferase (IU/L)") +
+  theme_minimal()
+
+# Albumin and Globulin Ratio vs. Disease Presence
+plot4 <- ggplot(data = liver_data, aes(x = factor(selector), y = agratio, fill = factor(selector))) +
+  geom_boxplot() +
+  labs(title = "agratio vs. Disease Presence",
+       x = "Disease Presence",
+       y = "Albumin and Globulin Ratio") +
+  theme_minimal()
+
+combined_plot_1_2 <- plot1 + plot2 +
+  plot_layout(nrow = 1, ncol = 2) 
+print(combined_plot_1_2)
+
+combined_plot_3_4 <- plot3 + plot4 +
+  plot_layout(nrow = 1, ncol = 2) 
+print(combined_plot_3_4)
+
+```
+
+- The plots reveal trends in liver function tests relative to the presence of liver disease:
+
+1. **Total Bilirubin** and **Alkaline Phosphatase**: Both markers display **higher levels associated with disease presence**, indicating their potential as significant indicators of liver disease.
+
+2. **Aspartate Aminotransferase (SGOT)**: Shows elevated levels more frequently in the disease group, with a wide distribution among all patients, highlighting variability but a general trend towards **higher levels in affected individuals**.
+
+3. **Albumin and Globulin Ratio (A/G Ratio)**: Those without the disease tend to have a **higher median A/G ratio**, suggesting better liver function, whereas diseased patients exhibit more variability and **lower median values**.
+
+
+# What demographic factors (age, gender) are associated with an increased likelihood of liver disease?
+
+```{r}
+# Plot showing age distribution categorized by disease presence
+age_disease_plot <- ggplot(data = liver_data, aes(x = age, fill = factor(selector))) +
+  geom_histogram(position = "identity", alpha = 0.6, bins = 30) +
+  labs(title = "Age Distribution by Disease Presence",
+       x = "Age",
+       y = "Count",
+       fill = "Disease Presence") +
+  theme_minimal()
+
+print(age_disease_plot)
+
+```
+
+**Age Distribution by Disease Presence**: Peaks in liver disease are evident in **individuals in their early 30s and late 50s to early 60s**, suggesting these age groups are at **higher risk**.
+
+```{r}
+# Plot showing gender distribution categorized by disease presence
+gender_disease_plot <- ggplot(data = liver_data, aes(x = factor(gender), fill = factor(selector))) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("1" = "red", "2" = "blue")) +
+  labs(title = "Gender Distribution by Disease Presence",
+       x = "Gender",
+       y = "Count",
+       fill = "Disease Presence") +
+  theme_minimal()
+
+print(gender_disease_plot)
+
+```
+
+
+**Gender Distribution by Disease Presence**: Males show a **significantly higher count of liver disease** compared to females, indicating that **being male is associated with a higher likelihood** of liver disease.
+
+
+# Can we predict liver disease status based on available patient data, and which features are most predictive?
+
+KEY STEPS : 
+
+- Imputed Missing Values
+
+- Scaling (Only For KNN)
+
+- Feature Engineering
+
+- Balanced the Dataset
+
+- Performed Parameter Tuning
+
+## Random Forest Model
+
+### With All features
+
+
+```{r warning=FALSE, include=FALSE}
+# Checking for missing values
+print(sum(is.na(df)))
+
+# Imputing missing values using median for numerical columns and mode for categorical columns
+for(col in names(df)) {
+  if(class(df[[col]]) %in% c("integer", "numeric")) {
+    df[[col]][is.na(df[[col]])] <- median(df[[col]], na.rm = TRUE)
+  } else if(class(df[[col]]) == "factor") {
+    mode <- names(sort(table(df[[col]]), decreasing = TRUE))[1]
+    df[[col]][is.na(df[[col]])] <- mode
+  }
+}
+
+```
+
+
+
+```{r warning=FALSE, include=FALSE}
+# Ensuring 'gender' and 'selector' are treated as factor variables
+df$selector <- df$selector - 1
+df$gender <- as.factor(df$gender)
+df$selector <- as.factor(df$selector)
+
+```
+
+
+```{r warning=FALSE, include=FALSE}
+set.seed(123)
+# Splitting the df into training and test sets
+trainIndex <- createDataPartition(df$selector, p = 0.7, list = FALSE, times = 1)
+train_df <- df[trainIndex, ]
+test_df <- df[-trainIndex, ]
+
+```
+
+
+```{r}
+set.seed(123)
+
+fitControl <- trainControl(method = "cv", number = 10)
+model_rf <- train(selector ~ ., data = train_df, method = "rf", trControl = fitControl)
+print(model_rf)
+```
+
+```{r}
+# Predictions on test data
+predictions <- predict(model_rf, newdata = test_df)
+
+# Confusion matrix
+conf_matrix <- confusionMatrix(predictions, test_df$selector)
+print(conf_matrix)
+```
+
+
+```{r warning=FALSE, include=FALSE}
+# ROC curve
+prob_predictions <- predict(model_rf, newdata = test_df, type = "prob")
+binary_predictions <- ifelse(prob_predictions[, 2] > 0.5, 1, 0)
+roc_curve0 <- roc(response = as.numeric(test_df$selector)-1, predictor = as.numeric(binary_predictions))
+plot(roc_curve0, main = "ROC Curve")
+```
+
+### With subset made to avoid collinearity
+```{r warning=FALSE, include=FALSE}
+# Removing highly correlated features from the Dataset
+cor_matrix <- cor(liver_data[c("age", "tb", "db", "alkphos", "sgpt", "sgot", "tp", "alb")], use = "complete.obs")  
+high_cor <- findCorrelation(cor_matrix, cutoff = 0.8, verbose = TRUE)
+data <- df[, -high_cor]
+```
+
+
+```{r warning=FALSE, include=FALSE}
+set.seed(123)
+# Split the df into training and test sets
+trainIndex <- createDataPartition(data$selector, p = 0.7, list = FALSE, times = 1)
+train_data <- data[trainIndex, ]
+test_data <- data[-trainIndex, ]
+
+```
+
+
+```{r}
+set.seed(123)
+# Train the model
+fitControl <- trainControl(method = "cv", number = 10)
+model_rf <- train(selector ~ ., data = train_data, method = "rf", trControl = fitControl)
+print(model_rf)
+```
+
+```{r}
+# Prediction on test data
+predictions <- predict(model_rf, newdata = test_data)
+
+# Confusion matrix
+conf_matrix <- confusionMatrix(predictions, test_data$selector)
+print(conf_matrix)
+```
+```{r warning=FALSE, include=FALSE}
+prob_predictions <- predict(model_rf, newdata = test_data, type = "prob")
+binary_predictions <- ifelse(prob_predictions[, 2] > 0.5, 1, 0)
+
+
+roc_curve1 <- roc(response = as.numeric(test_data$selector)-1, predictor = as.numeric(binary_predictions))
+plot(roc_curve1, main = "ROC Curve")
+```
+
+
+Using the subset did not help us getting a better result.
+
+### With Feature Engineering
+
+```{r}
+# Creating new Features 
+data = df
+data$ratio_tb_db <- data$tb / data$db
+data$diff_tb_db <- data$tb - data$db
+
+data$interaction_sgpt_sgot <- data$sgpt * data$sgot
+
+data$alkphos_sq <- data$alkphos^2
+data$sgpt_sq <- data$sgpt^2
+
+data$norm_alkphos <- (data$alkphos - min(data$alkphos)) / (max(data$alkphos) - min(data$alkphos))
+data$std_sgpt <- (data$sgpt - mean(data$sgpt)) / sd(data$sgpt)
+
+data$log_sgpt <- log(data$sgpt + 1)
+
+data$age_group <- cut(data$age, breaks=c(0, 20, 40, 60, 80, 100), labels=c("0-20", "21-40", "41-60", "61-80", "81-100"))
+```
+
+```{r}
+corrplot(cor(data[c("age", "tb", "db", "alkphos", "sgpt", "sgot", "tp", "alb", "ratio_tb_db", "diff_tb_db", "interaction_sgpt_sgot", "alkphos_sq", "sgpt_sq", "norm_alkphos", "std_sgpt", "log_sgpt")]),
+         method="color",col=colorRampPalette(c("#df1911", "#df5d00", "#F5E3B3","#D9fdd9","#C8F3B3" ))(100),type="upper",tl.srt=90,tl.col="black")
+```
+```{r warning=FALSE, include=FALSE}
+# Ensure 'gender' and 'selector' are treated as factor variables
+data$gender <- as.factor(data$gender)
+data$selector <- as.factor(data$selector)
+data$age_group <- as.factor(data$age_group)
+```
+
+```{r warning=FALSE, include=FALSE}
+set.seed(123)
+# Splitting the df into training and test sets
+data = data[, c("selector", "ratio_tb_db", "diff_tb_db", "interaction_sgpt_sgot", "alkphos_sq", "sgpt_sq", "norm_alkphos", "std_sgpt", "log_sgpt")]
+trainIndex <- createDataPartition(data$selector, p = 0.7, list = FALSE, times = 1)
+train_data <- data[trainIndex, ]
+test_data <- data[-trainIndex, ]
+
+```
+
+
+
+```{r}
+set.seed(123)
+
+tuning_grid <- expand.grid(
+  mtry = c(2, round(sqrt(ncol(train_data)-1)), round(ncol(train_data)/3))
+)
+
+train_control <- trainControl(
+  method = "cv",         
+  number = 10,            
+  search = "grid"         
+)
+
+model_rf <- train(
+  selector ~ .,
+  data = train_data,
+  method = "rf",              
+  trControl = train_control,
+  tuneGrid = tuning_grid,
+  metric = "Accuracy"
+)
+
+print(model_rf)
+```
+
+```{r}
+# Prediction on test data
+predictions <- predict(model_rf, newdata = test_data)
+
+# Confusion matrix
+conf_matrix <- confusionMatrix(predictions, test_data$selector)
+print(conf_matrix)
+```
+```{r warning=FALSE, include=FALSE}
+prob_predictions <- predict(model_rf, newdata = test_data, type = "prob")
+binary_predictions <- ifelse(prob_predictions[, 2] > 0.5, 1, 0)
+
+
+roc_curve2 <- roc(response = as.numeric(test_data$selector)-1, predictor = as.numeric(binary_predictions))
+plot(roc_curve2, main = "ROC Curve")
+```
+
+
+### On a Balanced Dataset
+
+```{r}
+# Splitting the df into training and test sets using Balanced Sampling
+set.seed(123)
+data = data[, c("selector", "ratio_tb_db", "diff_tb_db", "interaction_sgpt_sgot", "alkphos_sq", "sgpt_sq", "norm_alkphos", "std_sgpt", "log_sgpt")]
+
+data_class_0 <- data[data$selector == 0, ]
+data_class_1 <- data[data$selector == 1, ]
+
+sample_size <- min(nrow(data_class_0), nrow(data_class_1))
+
+train_index_0 <- sample(nrow(data_class_0), size = sample_size * 0.7)
+train_index_1 <- sample(nrow(data_class_1), size = sample_size * 0.7)
+
+train_data <- rbind(data_class_0[train_index_0, ], data_class_1[train_index_1, ])
+test_data <- rbind(data_class_0[-train_index_0, ], data_class_1[-train_index_1, ])
+
+table(train_data$selector) / nrow(train_data)
+```
+
+
+```{r}
+# Training the model
+fitControl <- trainControl(method = "cv", number = 10)
+model_rf <- train(selector ~ ., data = train_data, method = "rf", trControl = fitControl)
+print(model_rf)
+```
+
+```{r}
+# Prediction on test data
+predictions <- predict(model_rf, newdata = test_data)
+
+# Confusion matrix
+conf_matrix <- confusionMatrix(predictions, test_data$selector)
+print(conf_matrix)
+```
+```{r warning=FALSE, include=FALSE}
+prob_predictions <- predict(model_rf, newdata = test_data, type = "prob")
+binary_predictions <- ifelse(prob_predictions[, 2] > 0.5, 1, 0)
+
+
+roc_curve3 <- roc(response = as.numeric(test_data$selector)-1, predictor = as.numeric(binary_predictions))
+plot(roc_curve3, main = "ROC Curve")
+```
+
+### Comparison of all the models
+```{r}
+# Calculating TPR and FPR
+roc_df <- data.frame(
+  FPR = c(roc_curve0$specificities, roc_curve1$specificities, roc_curve2$specificities, roc_curve3$specificities ),
+  TPR = c(roc_curve0$sensitivities, roc_curve1$sensitivities, roc_curve2$sensitivities, roc_curve3$sensitivities),
+  Model = rep(c("All Features", "Subset: Highly correlated features removed", "Feature Engineering", "Feature Engineering + Balanced Dataset"), each = length(roc_curve1$sensitivities))
+)
+roc_df$FPR <- 1 - roc_df$FPR
+
+ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
+  geom_line() + 
+  geom_abline(linetype = "dashed", color = "gray") +  
+  labs(title = "ROC Curve Comparison for Random Forest", x = "False Positive Rate", y = "True Positive Rate") +
+  scale_color_manual(values = c("red", "blue", "green", "purple")) +  
+  theme_minimal()
+
+```
+
+
+- Effectiveness of Feature Engineering: The improvement in performance with feature engineering stresses the importance of domain knowledge and hypothesis-driven feature creation in enhancing model predictive power.
+- Balance in Dataset: The notable enhancement in model performance with a balanced dataset underscores the impact of addressing class imbalance in training datasets, particularly for medical or biological data where outcome classes can be inherently skewed.
+- Correlated Features: The slight decrease in performance after removing highly correlated features suggests that multicollinearity was not adversely affecting the performance in this case. For Random Forest, which can handle correlated features well, the removal of these features might not always be beneficial.
+
+## K Nearest Neighours Model
+
+### With all Features
+```{r warning=FALSE, include=FALSE}
+# Scaling the data, excluding the target variable 'selector'
+preProcValues <- preProcess(train_df[, -which(names(train_df) == "selector")], method = c("center", "scale"))
+
+train_df_scaled <- predict(preProcValues, train_df)
+test_df_scaled <- predict(preProcValues, test_df)
+
+train_df_scaled$selector <- train_df$selector
+test_df_scaled$selector <- test_df$selector
+```
+
+
+```{r warning=FALSE, include=FALSE}
+set.seed(123)
+knn_fit <- train(selector ~ ., data = train_df_scaled, method = "knn",
+                 trControl = trainControl(method = "cv", number = 10),
+                 preProcess = "scale",
+                 tuneLength = 10)  
+
+```
+
+
+```{r}
+# Prediction on test df
+knn_predictions <- predict(knn_fit, newdata = test_df_scaled)
+
+# Confusion Matrix
+conf_matrix <- confusionMatrix(knn_predictions, test_df_scaled$selector)
+print(conf_matrix)
+```
+
+
+```{r}
+# Plotting model performance across different k values
+plot(knn_fit)
+
+```
+
+
+```{r warning=FALSE, include=FALSE}
+roc_curve11 <- roc(response = as.numeric(test_df_scaled$selector)-1, predictor = as.numeric(knn_predictions)-1)
+plot(roc_curve11, main = "ROC Curve")
+```
+
+
+### With Feature Engineering
+
+
+```{r warning=FALSE, include=FALSE}
+set.seed(123)
+
+# Scaling the data, excluding the target variable 'selector'
+preProcValues <- preProcess(data[, -which(names(data) == "selector")], method = c("center", "scale"))
+data_scaled <- predict(preProcValues, data)
+data_scaled$selector <- data$selector
+
+# Splitting the df into training and test sets
+trainIndex <- createDataPartition(data_scaled$selector, p = 0.7, list = FALSE, times = 1)
+train_df_scaled <- data_scaled[trainIndex, ]
+test_df_scaled <- data_scaled[-trainIndex, ]
+```
+
+
+```{r}
+knn_fit <- train(selector ~ ., data = train_df_scaled, method = "knn",
+                 trControl = trainControl(method = "cv", number = 10),
+                 preProcess = "scale",
+                 tuneLength = 10)  
+
+```
+
+
+```{r}
+# Prediction on test df
+knn_predictions <- predict(knn_fit, newdata = test_df_scaled)
+
+# Confusion Matrix
+conf_matrix <- confusionMatrix(knn_predictions, test_df_scaled$selector)
+print(conf_matrix)
+```
+
+
+```{r warning=FALSE, include=FALSE}
+# Plotting model performance across different k values
+plot(knn_fit)
+```
+
+
+```{r warning=FALSE, include=FALSE}
+roc_curve22 <- roc(response = as.numeric(test_df_scaled$selector)-1, predictor = as.numeric(knn_predictions)-1)
+plot(roc_curve22, main = "ROC Curve")
+```
+
+### Comparison of Both the Models
+
+```{r}
+# Calculating TPR and FPR
+roc_df <- data.frame(
+  FPR = c(roc_curve11$specificities, roc_curve22$specificities),
+  TPR = c(roc_curve11$sensitivities, roc_curve22$sensitivities),
+  Model = rep(c("All Features", "Feature Engineering"), each = length(roc_curve1$sensitivities))
+)
+
+roc_df$FPR <- 1 - roc_df$FPR
+
+ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
+  geom_line() + 
+  geom_abline(linetype = "dashed", color = "gray") +  
+  labs(title = "ROC Curve Comparison for KNN", x = "False Positive Rate", y = "True Positive Rate") +
+  scale_color_manual(values = c("red", "blue")) +  
+  theme_minimal()
+
+```
+
+
+Definitely Feature Engineering Positively impacts our model in a positive direction. 
+
+## Plots for Comparison between Random Forest and KNN
+```{r}
+
+# Calculating TPR and FPR
+roc_df <- data.frame(
+  FPR = c(roc_curve0$specificities, roc_curve1$specificities, roc_curve2$specificities, roc_curve3$specificities, roc_curve11$specificities, roc_curve22$specificities),
+  TPR = c(roc_curve0$sensitivities, roc_curve1$sensitivities, roc_curve2$sensitivities, roc_curve3$sensitivities, roc_curve11$sensitivities, roc_curve22$sensitivities),
+  Model = rep(c("All Features: RF", "Subset: Highly correlated features removed: RF", "Feature Engineering: RF", "Feature Engineering + Balanced Dataset: RF","All Features: KNN","Feature Engineering: KNN"), each = length(roc_curve1$sensitivities))
+)
+
+roc_df$FPR <- 1 - roc_df$FPR
+
+ggplot(roc_df, aes(x = FPR, y = TPR, color = Model)) +
+  geom_line() +
+  geom_abline(linetype = "dashed", color = "gray") +  
+  labs(title = "ROC Curve Comparison for Random Forest", x = "False Positive Rate", y = "True Positive Rate") +
+  scale_color_manual(values = c("red", "blue", "green", "purple", "pink", "yellow")) +  
+  theme_minimal()
+
+
+```
+
+
+The ROC curve comparison indicates that the model combining **Feature Engineering with a Balanced Dataset using Random Forest** (green line) achieves the highest True Positive Rate across almost all thresholds, making it the best-performing model in this evaluation.
+
+# Challenges Encountered
+Several challenges emerged throughout the course of this project:
+
+1. **Data Skewness and Imbalance**: Many variables within the dataset were heavily skewed, and the class distribution was uneven. This required careful preprocessing and transformation to ensure models did not inherit these biases, which could skew predictions.
+   
+2. **Feature Selection and Engineering**: Determining the most impactful features and engineering new variables that could provide deeper insights into the dataset was a complex task. It involved extensive exploratory data analysis and experimentation to identify features that genuinely improved model performance.
+
+3. **Model Selection and Tuning**: Selecting the appropriate models and tuning them for optimal performance posed significant challenges, particularly given the imbalanced nature of the data. Balancing accuracy and the ability to generalize to new data required rigorous cross-validation and testing.
+
+4. **Technical Implementation**: Developing an interactive R Shiny application to dynamically present data analysis and model results involved overcoming technical hurdles related to UI design and ensuring responsive performance.
+
+These challenges were instrumental in enhancing my analytical capabilities and understanding of machine learning application in medical diagnostics.
+
+# Conclusion
+
+In conclusion, this comprehensive Data exploration on liver disease diagnosis leveraged detailed exploratory data analysis and machine learning to identify and predict liver disease from clinical data. The analysis successfully highlighted key relationships between liver function tests and the presence of liver disease, with certain biomarkers like Total Bilirubin and Alkaline Phosphatase proving particularly indicative of disease presence. Both demographic analyses and feature engineering played critical roles in improving model accuracy, as evidenced by the superior performance of models utilizing engineered features and balanced datasets. The development of an R Shiny application further facilitated the interactive exploration of data and model outcomes, enhancing the accessibility and utility of the findings. Ultimately, this project not only advanced understanding of liver disease diagnostics but also showcased the power of machine learning in medical data analysis, setting a foundation for future research and application in healthcare diagnostics.
