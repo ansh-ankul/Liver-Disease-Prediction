@@ -1,7 +1,3 @@
-Here’s a polished and professional version of your **GitHub project description** for your **Liver Disease Diagnosis and Prediction** project:
-
----
-
 ## 🩺 Liver Disease Diagnosis and Predictor Development
 
 ### 📊 Dataset
@@ -76,6 +72,3 @@ The goal of this project is to:
 
 Watch the full walkthrough: [Box Presentation Link](https://uofi.box.com/s/35l3u6p33g8q7ez77l2tgmofhba4t8k9)
 
----
-
-Let me know if you want a matching `README.md` file generated for GitHub, or if you'd like me to include code sections or app screenshots!
